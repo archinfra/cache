@@ -1,0 +1,153 @@
+name: Build Archinfra Cache v1.36.4
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/archinfra.build-v1.36.4.yml
+      - .github/scripts/runtime
+      - .github/scripts/cri
+      - .github/scripts/sealos
+      - .github/scripts/kube
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  REPOSITORY: archinfra/cache
+  KUBERNETES_VERSION: v1.36.4
+  SEALOS_VERSION: v5.1.1
+  RUNC_VERSION: v1.4.3
+  CONTAINERD_VERSION: v1.7.33
+  DOCKER_VERSION: v28.5.2
+  CRI_DOCKERD_VERSION: v0.4.4
+  DISTRIBUTION_VERSION: v3.1.1
+
+jobs:
+  verify-tools:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify tools cache
+        run: |
+          docker buildx imagetools inspect "${REGISTRY}/${REPOSITORY}:tools-amd64"
+          docker buildx imagetools inspect "${REGISTRY}/${REPOSITORY}:tools-arm64"
+
+  runtime:
+    needs: verify-tools
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build runtime cache
+        env:
+          ARCH: amd64
+        run: bash .github/scripts/runtime
+      - name: Verify runtime cache
+        run: docker buildx imagetools inspect "${REGISTRY}/${REPOSITORY}:runtime"
+
+  cri:
+    needs: runtime
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build CRI cache
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: bash .github/scripts/cri
+      - name: Verify CRI cache
+        run: docker buildx imagetools inspect "${REGISTRY}/${REPOSITORY}:cri-${{ matrix.arch }}"
+
+  sealos:
+    needs: cri
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build Sealos cache
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: bash .github/scripts/sealos
+      - name: Verify Sealos cache
+        run: docker buildx imagetools inspect "${REGISTRY}/${REPOSITORY}:sealos-${SEALOS_VERSION}-${{ matrix.arch }}"
+
+  kube:
+    needs: sealos
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y buildah
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build Kubernetes caches
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: bash .github/scripts/kube
+      - name: Verify Kubernetes caches
+        run: |
+          docker buildx imagetools inspect "${REGISTRY}/${REPOSITORY}:cri-v1.36-${{ matrix.arch }}"
+          docker buildx imagetools inspect "${REGISTRY}/${REPOSITORY}:kubernetes-${KUBERNETES_VERSION}-${{ matrix.arch }}"
