@@ -1,3 +1,12 @@
+name: kube
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   CHANGELOG:
     outputs:
@@ -32,8 +41,3 @@ jobs:
         run: bash .github/scripts/kube
     strategy:
       matrix: ${{ fromJson(needs.CHANGELOG.outputs.matrix) }}
-name: kube
-on:
-  schedule:
-    - cron: "* */8 * * *"
-  workflow_dispatch:
