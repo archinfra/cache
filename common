@@ -60,7 +60,7 @@ EOF
     popd >/dev/null || exit
   else
     docker run --rm -v "$checker_build:/checker" -w "$checker_build" --entrypoint /bin/sh "$REGISTRY/$REPOSITORY:$checker_tag" -c "cp -auv . /checker" || mkdir -p "$checker_build"
-    docker rmi --force "$REGISTRY/$REPOSITORY:$checker_tag"
+    docker rmi --force "$REGISTRY/$REPOSITORY:$checker_tag" || true
     sudo chown -R "$(whoami)" "$checker_build"
   fi
 }
