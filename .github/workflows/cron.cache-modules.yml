@@ -1,9 +1,19 @@
+name: cache-modules
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
 env:
   CONTEXT: modules
   REGISTRY: ghcr.io
   REPOSITORY: ${{ github.repository }}
   REPOSITORY_OWNER: ${{ github.repository_owner }}
   REPOSITORY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 jobs:
   module:
     needs:
@@ -32,6 +42,3 @@ jobs:
           bash modules/versions.sh
           yq -CP versions
           echo "matrix=$(yq -oj versions | jq -rc)" >>$GITHUB_OUTPUT
-name: cache-modules
-on:
-  workflow_dispatch:
