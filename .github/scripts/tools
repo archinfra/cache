@@ -39,19 +39,18 @@ until curl -sL "https://github.com/upx/upx/releases/download/v$UPX/upx-$UPX-${AR
 until curl -sL "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK/shellcheck-v$SHELLCHECK.linux.$ALIAS_ARCH.tar.xz" | tar xJ "shellcheck-v$SHELLCHECK/shellcheck" --strip-components=1; do sleep 3; done
 find . -type f -exec file {} \; | grep -E "(executable,|/ld-)" | awk -F: '{print $1}' | grep -vE "\.so" | while IFS='' read -r elf; do sudo chmod a+x "$elf" && binary_verify "$elf"; done
 cat <<EOF >"/tmp/$image_tag"
-FROM muicoder/containers:buildah-v1.41.5 AS buildah
 FROM alpine:3
-COPY --from=buildah /usr/local/sbin /tools
 COPY . /tools
 EOF
 tree -L 5
-# 构建镜像：禁用缓存并直接推送
+# Buildah is intentionally not embedded here. Workflows that require Buildah
+# install it explicitly on the runner so the build dependency is visible and reproducible.
 docker buildx build \
   --platform "linux/$ARCH" \
   --no-cache \
   --push \
   --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
-  --label "org.opencontainers.image.description=helm-v$HELM,yq-v$YQ,upx-v$UPX container image" \
+  --label "org.opencontainers.image.description=helm-v$HELM,yq-v$YQ,upx-v$UPX,shellcheck-v$SHELLCHECK container image" \
   --label "org.opencontainers.image.licenses=MIT" \
   -t "$REGISTRY/$REPOSITORY:$image_tag" \
   -f "/tmp/$image_tag" \
