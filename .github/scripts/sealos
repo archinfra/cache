@@ -12,19 +12,22 @@ is_released() {
   until git ls-remote --refs --sort="-version:refname" --tags "https://github.com/labring/sealos.git" | cut -d/ -f3- | grep -E "^v[5-9].+"; do sleep 3; done >.versions
 
   while read -r vSEALOS; do
-    # 保留正式版本和RC版本，排除其他预发布版本
     if [[ "$vSEALOS" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && curl -sL "https://github.com/labring/sealos/releases/tag/$vSEALOS" | grep '="repo_releases"' >/dev/null; then
-      # 正式发布版本
       echo "$vSEALOS"
     elif [[ "$vSEALOS" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[Rr][Cc][0-9]*$ ]] || [[ "$vSEALOS" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[Rr][Cc]\.[0-9]+$ ]]; then
-      # RC版本
       echo "$vSEALOS"
     fi
   done <.versions | sort
   popd >/dev/null
 }
 
-for vSEALOS in $(is_released); do
+if [[ -n "${SEALOS_VERSION:-}" ]]; then
+  SEALOS_VERSIONS="v${SEALOS_VERSION#v}"
+else
+  SEALOS_VERSIONS="$(is_released)"
+fi
+
+for vSEALOS in $SEALOS_VERSIONS; do
   image_tag="sealos-$vSEALOS-$ARCH"
   pushd "$(mktemp -d)" >/dev/null || exit
   until curl -sL "https://github.com/labring/sealos/releases/download/$vSEALOS/sealos_${vSEALOS#*v}_linux_$ARCH.tar.gz" | tar -xz; do sleep 3; done
@@ -34,7 +37,6 @@ FROM alpine:3
 ADD . /sealos
 EOF
   tree -L 5
-  # 构建镜像：禁用缓存并直接推送
   docker buildx build \
     --platform "linux/$ARCH" \
     --no-cache \
@@ -48,5 +50,4 @@ EOF
   popd >/dev/null
 done
 
-# 清理临时文件
 rm -rf /tmp/tmp.*
