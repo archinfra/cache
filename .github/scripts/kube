@@ -2,11 +2,15 @@
 
 set -e
 
-checker_build="/tmp/checker.$(basename "$0")-${K8S_MD##*-}"
-(
-  until curl -sL "https://github.com/kubernetes/kubernetes/raw/master/CHANGELOG/$K8S_MD"; do sleep 3; done >"/tmp/$K8S_MD"
-  grep -E '^- \[v[0-9\.]+\]' "/tmp/$K8S_MD" | awk -F] '{print $1}' | awk -F[ '{print $NF}' >"/tmp/$K8S_MD.versions"
-)
+if [[ -n "${KUBERNETES_VERSION:-}" ]]; then
+  checker_build="/tmp/checker.$(basename "$0")-${KUBERNETES_VERSION#v}"
+else
+  checker_build="/tmp/checker.$(basename "$0")-${K8S_MD##*-}"
+  (
+    until curl -sL "https://github.com/kubernetes/kubernetes/raw/master/CHANGELOG/$K8S_MD"; do sleep 3; done >"/tmp/$K8S_MD"
+    grep -E '^- \[v[0-9\.]+\]' "/tmp/$K8S_MD" | awk -F] '{print $1}' | awk -F[ '{print $NF}' >"/tmp/$K8S_MD.versions"
+  )
+fi
 source common
 checker_image
 
@@ -48,10 +52,8 @@ kube_upgrade() {
   local image_tag="kubernetes-$vKUBE-$ARCH"
   pushd "$(mktemp -d)" >/dev/null || exit
   mkdir -p "images/shim" "bin"
-  # cache binary
   for binary in kubectl kubelet kubeadm; do until curl -sLo "bin/$binary" "https://dl.k8s.io/release/$vKUBE/bin/linux/$ARCH/$binary"; do sleep 3; done; done
   find . -type f -exec file {} \; | grep -E "(executable,|/ld-)" | awk -F: '{print $1}' | grep -vE "\.so" | while IFS='' read -r elf; do sudo chmod a+x "$elf" && binary_verify "$elf"; done
-  # cache image
   cat <<EOF >"Kubefile"
 FROM scratch
 EOF
@@ -65,13 +67,16 @@ EOF
   ./kubeadm config images list --kubernetes-version "$vKUBE" >"images/shim/DefaultImageList"
 
   sealos version &>/dev/null || (
-    sealos_tag="sealos-$(
-      until git ls-remote --refs --sort="-version:refname" --tags "https://github.com/labring/sealos.git" | cut -d/ -f3- | grep -E "^v4[0-9.]+$"; do sleep 3; done | head -n 1
-    )-amd64"
+    if [[ -n "${SEALOS_VERSION:-}" ]]; then
+      sealos_tag="sealos-v${SEALOS_VERSION#v}-amd64"
+    else
+      sealos_tag="sealos-$(
+        until git ls-remote --refs --sort="-version:refname" --tags "https://github.com/labring/sealos.git" | cut -d/ -f3- | grep -E "^v[5-9][0-9.]+$"; do sleep 3; done | head -n 1
+      )-amd64"
+    fi
     until sudo docker run --rm -v "/usr/bin:/pwd" -w /sealos --entrypoint /bin/sh "$REGISTRY/$REPOSITORY:$sealos_tag" -c "cp -au sealos /pwd"; do sleep 5; done
   )
   sudo sealos build -t "kubernetes:$image_tag" --platform "linux/$ARCH" .
-  # cache(binary+image)
   sudo chown -R "$(whoami)" .
   cat <<EOF >"/tmp/$image_tag"
 FROM scratch
@@ -80,7 +85,6 @@ COPY images /images
 COPY registry /registry
 EOF
   tree -L 5
-  # 构建镜像：禁用缓存并直接推送
   docker buildx build \
     --platform "linux/$ARCH" \
     --no-cache \
@@ -149,7 +153,6 @@ FROM alpine:3
 COPY . /cri
 EOF
   tree -L 5
-  # 构建镜像：禁用缓存并直接推送
   docker buildx build \
     --platform "linux/$ARCH" \
     --no-cache \
@@ -180,12 +183,17 @@ kube_released() {
       kube_upgrade "$vKUBE"
     done <"/tmp/$K8S_MD.versions"
   else
-    # unstable for CHANGELOG-v1.xx.md
     grep -E '^- \[v.+\]' "/tmp/$K8S_MD" | awk -F] '{print $1}' | awk -F[ '{print $NF}'
   fi
   popd >/dev/null
 }
 
-kube_released
+if [[ -n "${KUBERNETES_VERSION:-}" ]]; then
+  KUBERNETES_VERSION="v${KUBERNETES_VERSION#v}"
+  cri_released "${KUBERNETES_VERSION#v}"
+  kube_upgrade "$KUBERNETES_VERSION"
+else
+  kube_released
+fi
 
 rm -rf /tmp/tmp.*

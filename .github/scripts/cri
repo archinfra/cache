@@ -31,8 +31,22 @@ for name in ${!REPOS[*]}; do
   )"
 done
 
-CONTAINERD=$(git ls-remote --refs --sort="-version:refname" --tags "https://github.com/${REPOS[CONTAINERD]}.git" | cut -d/ -f3- | grep -E "^v1.7[0-9.]+$" | head -n 1 | cut -dv -f2)
-DOCKER=$(git ls-remote --refs --sort="-version:refname" --tags "https://github.com/${REPOS[DOCKER]}.git" | cut -d/ -f3- | grep -E "^v28[0-9.]+$" | head -n 1 | cut -dv -f2)
+if [[ -n "${CONTAINERD_VERSION:-}" ]]; then
+  CONTAINERD="${CONTAINERD_VERSION#v}"
+else
+  CONTAINERD=$(git ls-remote --refs --sort="-version:refname" --tags "https://github.com/${REPOS[CONTAINERD]}.git" | cut -d/ -f3- | grep -E "^v1.7[0-9.]+$" | head -n 1 | cut -dv -f2)
+fi
+if [[ -n "${DOCKER_VERSION:-}" ]]; then
+  DOCKER="${DOCKER_VERSION#v}"
+else
+  DOCKER=$(git ls-remote --refs --sort="-version:refname" --tags "https://github.com/${REPOS[DOCKER]}.git" | cut -d/ -f3- | grep -E "^v28[0-9.]+$" | head -n 1 | cut -dv -f2)
+fi
+if [[ -n "${CRI_DOCKERD_VERSION:-}" ]]; then
+  CRIDOCKER="${CRI_DOCKERD_VERSION#v}"
+fi
+if [[ -n "${DISTRIBUTION_VERSION:-}" ]]; then
+  DISTRIBUTION="${DISTRIBUTION_VERSION#v}"
+fi
 
 get_pkg() {
   local target=${1?Please input target} filename=${1##*/} obj_path crun_tag
@@ -51,11 +65,7 @@ get_pkg() {
   cri-dockerd)
     obj_path=cri-dockerd
     mkdir -p "$obj_path"
-    if false; then
-      until curl -sLo "$obj_path"/cri-dockerd "https://github.com/Mirantis/cri-dockerd/releases/download/v$CRIDOCKER/cri-dockerd-$CRIDOCKER.$ARCH"; do sleep 3; done
-    else
-      until curl -sL "https://github.com/Mirantis/cri-dockerd/releases/download/v$CRIDOCKER/cri-dockerd-$CRIDOCKER.$ARCH.tgz" | tar -xz -C "$obj_path" --strip-components=1 cri-dockerd/cri-dockerd; do sleep 3; done
-    fi
+    until curl -sL "https://github.com/Mirantis/cri-dockerd/releases/download/v$CRIDOCKER/cri-dockerd-$CRIDOCKER.$ARCH.tgz" | tar -xz -C "$obj_path" --strip-components=1 cri-dockerd/cri-dockerd; do sleep 3; done
     until curl -sLo "$target"v125 "https://github.com/Mirantis/cri-dockerd/releases/download/v0.2.6/cri-dockerd-0.2.6.$ARCH.tgz"; do sleep 3; done
     ;;
   esac
@@ -70,9 +80,6 @@ image_tag="cri-$ARCH"
 pushd "$(mktemp -d)" >/dev/null
 get_pkg "$PWD/cri-containerd.tar.gz"
 get_pkg "$PWD/cri-dockerd.tgz"
-# kube 1.16(docker-18.09)
-# kube 1.17-20(docker-19.03)
-# kube 1.21-23(docker-20.10)
 for major in 18 19 20 23 24 25 26 27 28; do
   for tag in $(git ls-remote --refs --sort="-version:refname" --tags "https://github.com/${REPOS[DOCKER]}.git" | cut -d/ -f3- | grep -E "^v${major}[0-9.]+$" | head -n 9 | cut -dv -f2); do
     until curl -sLo "docker-${tag%.*}.tgz" "https://download.docker.com/linux/static/stable/$ALIAS_ARCH/docker-$tag.tgz"; do sleep 3; done
@@ -82,8 +89,6 @@ for major in 18 19 20 23 24 25 26 27 28; do
     fi
   done
 done
-# kube 1.24-25(cri-dockerd v0.2.x)
-# kube 1.26-xx(cri-dockerd v0.3.x)
 if [[ -s "docker-${DOCKER%.*}.tgz" ]]; then
   mv "docker-${DOCKER%.*}.tgz" "docker.tgz"
 else
@@ -110,12 +115,17 @@ until curl -sL "https://github.com/distribution/distribution/releases/download/v
 until curl -sL "https://github.com/labring/cluster-image/releases/download/depend/library-2.5-linux-$ARCH.tar.gz" | tar -xz --strip-components=2 library/bin/conntrack; do sleep 3; done
 until curl -sLo lsof "https://github.com/labring/cluster-image/releases/download/depend/lsof-linux-$ARCH"; do sleep 3; done
 find . -type f -exec file {} \; | grep -E "(executable,|/ld-)" | awk -F: '{print $1}' | grep -vE "\.so" | while IFS='' read -r elf; do sudo chmod a+x "$elf" && binary_verify "$elf"; done
+cat <<EOF >.versions
+CONTAINERD=v$CONTAINERD
+CRIDOCKER=v$CRIDOCKER
+DOCKER=v$DOCKER
+DISTRIBUTION=v$DISTRIBUTION
+EOF
 cat <<EOF >"/tmp/$image_tag"
 FROM alpine:3
 COPY . /cri
 EOF
 tree -L 5
-# 构建镜像：禁用缓存并直接推送
 docker buildx build \
   --platform "linux/$ARCH" \
   --no-cache \
