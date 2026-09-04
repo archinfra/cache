@@ -20,6 +20,10 @@ for name in ${!REPOS[*]}; do
   )"
 done
 
+if [[ -n "${RUNC_VERSION:-}" ]]; then
+  RUNC="${RUNC_VERSION#v}"
+fi
+
 image_tag="runtime"
 pushd "$(mktemp -d)" >/dev/null
 {
@@ -41,7 +45,6 @@ FROM alpine:3
 COPY . /runtime
 EOF
 tree -L 5
-# 构建镜像：禁用缓存并直接推送
 docker buildx build \
   --platform "linux/amd64" \
   --no-cache \
